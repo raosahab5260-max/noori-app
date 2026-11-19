@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.NooriCompanion" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#090514</item>
+        <item name="android:navigationBarColor">#090514</item>
+    </style>
+</resources>
