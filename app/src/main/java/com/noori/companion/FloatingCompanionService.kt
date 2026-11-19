@@ -67,7 +67,7 @@ class FloatingCompanionService : Service() {
 
     private val breatheRunnable = object : Runnable {
         override fun run() {
-            avatarView?.animate()?.scaleX(if (pulseUp) 1.05f else 1.0f)?.scaleY(if (pulseUp) 1.05f else 1.0f)?.setDuration(950)?.start()
+            avatarView?.animate()?.scaleX(if (pulseUp) 1.03f else 1.0f)?.scaleY(if (pulseUp) 1.03f else 1.0f)?.setDuration(950)?.start()
             pulseUp = !pulseUp
             handler.postDelayed(this, 1000)
         }
@@ -98,10 +98,7 @@ class FloatingCompanionService : Service() {
                 }
                 serviceScope.launch {
                     val res = AIClient.sendMessage(
-                        AIProvider.GEMINI,
                         prefs.getString("gemini_api_key", "") ?: "",
-                        "",
-                        "Caring & Playful",
                         emptyList(),
                         memoryManager.getMemories(),
                         spoken
@@ -143,21 +140,25 @@ class FloatingCompanionService : Service() {
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             flag, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.START; x = 36; y = 240 }
+        ).apply { gravity = Gravity.TOP or Gravity.START; x = 36; y = 220 }
 
         val d = resources.displayMetrics.density
-        val sizePx = (74 * d).toInt()
+        val sizeW = (92 * d).toInt()
+        val sizeH = (164 * d).toInt()
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
         val frame = FrameLayout(this)
 
         val avatar = ImageView(this).apply {
             setImageResource(R.drawable.noori_ref)
             scaleType = ImageView.ScaleType.CENTER_CROP
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setStroke((3f * d).toInt(), Color.parseColor("#A855F7")) }
+            background = GradientDrawable().apply {
+                cornerRadius = 16 * d
+                setStroke((2f * d).toInt(), Color.parseColor("#A855F7"))
+            }
             clipToOutline = true
         }
         avatarView = avatar
-        frame.addView(avatar, FrameLayout.LayoutParams(sizePx, sizePx))
+        frame.addView(avatar, FrameLayout.LayoutParams(sizeW, sizeH))
 
         val closeBtn = TextView(this).apply {
             text = "✕"; textSize = 10f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
