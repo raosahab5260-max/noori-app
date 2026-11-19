@@ -13,10 +13,14 @@ data class MemoryItem(
 class MemoryManager(context: Context) {
     private val prefs = context.getSharedPreferences("noori_memory_db", Context.MODE_PRIVATE)
     private val key = "saved_memories_v1"
+    private val enabledKey = "memory_enabled_v1"
 
     private val sensitiveKeywords = listOf(
         "password", "otp", "pin", "cvv", "aadhaar", "pan card", "bank", "पासवर्ड", "ओटीपी", "पिन"
     )
+
+    fun isMemoryEnabled(): Boolean = prefs.getBoolean(enabledKey, true)
+    fun setMemoryEnabled(enabled: Boolean) = prefs.edit().putBoolean(enabledKey, enabled).apply()
 
     fun isSensitive(text: String): Boolean {
         val lower = text.lowercase()
@@ -29,11 +33,7 @@ class MemoryManager(context: Context) {
             val arr = JSONArray(raw)
             List(arr.length()) { i ->
                 val obj = arr.getJSONObject(i)
-                MemoryItem(
-                    id = obj.getLong("id"),
-                    fact = obj.getString("fact"),
-                    createdAt = obj.optLong("createdAt", System.currentTimeMillis())
-                )
+                MemoryItem(obj.getLong("id"), obj.getString("fact"), obj.optLong("createdAt", System.currentTimeMillis()))
             }
         } catch (_: Exception) {
             emptyList()
@@ -43,39 +43,24 @@ class MemoryManager(context: Context) {
     private fun saveAll(list: List<MemoryItem>) {
         val arr = JSONArray()
         list.forEach { item ->
-            arr.put(
-                JSONObject()
-                    .put("id", item.id)
-                    .put("fact", item.fact)
-                    .put("createdAt", item.createdAt)
-            )
+            arr.put(JSONObject().put("id", item.id).put("fact", item.fact).put("createdAt", item.createdAt))
         }
         prefs.edit().putString(key, arr.toString()).apply()
     }
 
     fun addMemory(fact: String, allowSensitive: Boolean = false): Boolean {
+        if (!isMemoryEnabled()) return false
         val clean = fact.trim()
         if (clean.isEmpty()) return false
         if (!allowSensitive && isSensitive(clean)) return false
-
         val current = getMemories().toMutableList()
         if (current.any { it.fact.equals(clean, ignoreCase = true) }) return false
-        current.add(0, MemoryItem(id = System.currentTimeMillis(), fact = clean))
+        current.add(0, MemoryItem(System.currentTimeMillis(), clean))
         saveAll(current)
         return true
     }
 
-    fun updateMemory(id: Long, newFact: String) {
-        val clean = newFact.trim()
-        if (clean.isEmpty()) return
-        val updated = getMemories().map {
-            if (it.id == id) it.copy(fact = clean) else it
-        }
-        saveAll(updated)
-    }
+    fun deleteMemory(id: Long) = saveAll(getMemories().filterNot { it.id == id })
 
-    fun deleteMemory(id: Long) {
-        val filtered = getMemories().filterNot { it.id == id }
-        saveAll(filtered)
-    }
+    fun clearAll() = saveAll(emptyList())
 }
