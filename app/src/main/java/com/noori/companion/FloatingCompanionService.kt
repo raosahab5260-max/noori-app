@@ -98,7 +98,10 @@ class FloatingCompanionService : Service() {
                 }
                 serviceScope.launch {
                     val res = AIClient.sendMessage(
+                        AIProvider.GEMINI,
                         prefs.getString("gemini_api_key", "") ?: "",
+                        "",
+                        "Caring & Playful",
                         emptyList(),
                         memoryManager.getMemories(),
                         spoken
