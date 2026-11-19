@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
@@ -17,7 +19,6 @@ import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
-import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -39,16 +40,36 @@ class FloatingCompanionService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
     private var pulseUp = true
+    private var lastGreetingIdx = -1
+
+    private val greetings = listOf(
+        "आप आ गए! ❤️",
+        "हेलो Ansh! आज कैसे हो?",
+        "मैं आपका इंतज़ार कर रही थी!",
+        "चलो, आज कुछ नया करते हैं!"
+    )
+
+    private val unlockReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_USER_PRESENT) {
+                val prefs = getSharedPreferences("noori_prefs", Context.MODE_PRIVATE)
+                if (prefs.getBoolean("unlock_greeting", true)) {
+                    var idx = (greetings.indices).random()
+                    if (idx == lastGreetingIdx) idx = (idx + 1) % greetings.size
+                    lastGreetingIdx = idx
+                    val msg = greetings[idx]
+                    statusBadge?.text = msg
+                    voiceManager?.speak(msg)
+                }
+            }
+        }
+    }
 
     private val breatheRunnable = object : Runnable {
         override fun run() {
-            avatarView?.animate()
-                ?.scaleX(if (pulseUp) 1.05f else 1.0f)
-                ?.scaleY(if (pulseUp) 1.05f else 1.0f)
-                ?.setDuration(900)
-                ?.start()
+            avatarView?.animate()?.scaleX(if (pulseUp) 1.05f else 1.0f)?.scaleY(if (pulseUp) 1.05f else 1.0f)?.setDuration(950)?.start()
             pulseUp = !pulseUp
-            handler.postDelayed(this, 950)
+            handler.postDelayed(this, 1000)
         }
     }
 
@@ -57,70 +78,41 @@ class FloatingCompanionService : Service() {
     override fun onCreate() {
         super.onCreate()
         startAsForeground()
+        if (!Settings.canDrawOverlays(this)) { stopSelf(); return }
 
-        if (!Settings.canDrawOverlays(this)) {
-            stopSelf()
-            return
-        }
+        registerReceiver(unlockReceiver, IntentFilter(Intent.ACTION_USER_PRESENT))
 
         val memoryManager = MemoryManager(this)
         val prefs = getSharedPreferences("noori_prefs", Context.MODE_PRIVATE)
 
         voiceManager = VoiceManager(
             context = this,
-            onSpeakingStateChanged = { speaking ->
-                handler.post {
-                    statusBadge?.text = if (speaking) "🔊 बोल रही हूँ" else "💜 Noori"
-                }
-            },
-            onListeningStateChanged = { listening ->
-                handler.post {
-                    statusBadge?.text = if (listening) "🎤 सुन रही हूँ..." else "💜 Noori"
-                }
-            },
+            onSpeakingStateChanged = { s -> handler.post { statusBadge?.text = if (s) "🔊 बोल रही हूँ" else "💜 Noori" } },
+            onListeningStateChanged = { l -> handler.post { statusBadge?.text = if (l) "🎤 सुन रही हूँ..." else "💜 Noori" } },
             onSpeechResult = { spoken ->
-                handler.post { statusBadge?.text = "✨ सोच रही हूँ..." }
-                val lower = spoken.lowercase()
-                if (lower.contains("time") || spoken.contains("समय") || spoken.contains("बजे")) {
-                    val t = PhoneAssistant.getCurrentTimeText()
-                    voiceManager?.speak(t)
+                val local = PhoneAssistant.tryParseLocalCommand(spoken)
+                if (local != null) {
+                    val reply = PhoneAssistant.executeAction(this, local)
+                    voiceManager?.speak(reply)
                     return@VoiceManager
                 }
-
                 serviceScope.launch {
-                    val provider = if (prefs.getString("ai_provider", "GEMINI") == "OPENAI")
-                        AIProvider.OPENAI else AIProvider.GEMINI
-                    val result = AIClient.sendMessage(
-                        provider = provider,
-                        geminiKey = prefs.getString("gemini_api_key", "") ?: "",
-                        openAiKey = prefs.getString("openai_api_key", "") ?: "",
-                        mood = prefs.getString("noori_mood", "Caring & Playful") ?: "Caring & Playful",
-                        history = emptyList(),
-                        memories = memoryManager.getMemories(),
-                        userMessage = spoken
+                    val res = AIClient.sendMessage(
+                        AIProvider.GEMINI,
+                        prefs.getString("gemini_api_key", "") ?: "",
+                        "",
+                        "Caring & Playful",
+                        emptyList(),
+                        memoryManager.getMemories(),
+                        spoken
                     )
-                    when (result) {
-                        is AIResult.Success -> {
-                            if (!result.extractedMemory.isNullOrEmpty()) {
-                                memoryManager.addMemory(result.extractedMemory)
-                            }
-                            if (!result.actionTag.isNullOrEmpty()) {
-                                val act = PhoneAssistant.parseActionTag(result.actionTag)
-                                if (act != null) {
-                                    val msg = PhoneAssistant.executeAction(this@FloatingCompanionService, act)
-                                    voiceManager?.speak(msg)
-                                    return@launch
-                                }
-                            }
-                            voiceManager?.speak(result.reply)
-                        }
-                        is AIResult.Error -> voiceManager?.speak(result.message)
+                    when (res) {
+                        is AIResult.Success -> voiceManager?.speak(res.reply)
+                        is AIResult.Error -> voiceManager?.speak(res.message)
                     }
                 }
             },
-            onSpeechError = { err ->
-                handler.post { statusBadge?.text = "🎤 फिर बोलें" }
-            }
+            onSpeechError = { handler.post { statusBadge?.text = "🎤 फिर बोलें" } }
         )
 
         showOverlayBubble()
@@ -128,161 +120,155 @@ class FloatingCompanionService : Service() {
     }
 
     private fun startAsForeground() {
-        val channelId = "noori_floating_channel"
+        val ch = "noori_live_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "NOORI Home Companion",
-                NotificationManager.IMPORTANCE_LOW
+            getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(ch, "NOORI Live Companion", NotificationManager.IMPORTANCE_LOW)
             )
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
-
-        val openIntent = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification: Notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Noori होम स्क्रीन पर सक्रिय है 💜")
-            .setContentText("बोलने के लिए बबल पर टैप करें")
+        val pi = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val n: Notification = NotificationCompat.Builder(this, ch)
+            .setContentTitle("Noori होम स्क्रीन पर है 💜")
+            .setContentText("बात करने के लिए टैप करें")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentIntent(openIntent)
+            .setContentIntent(pi)
             .setOngoing(true)
             .build()
-
-        startForeground(101, notification)
+        startForeground(101, n)
     }
 
     private fun showOverlayBubble() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        } else {
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
-        }
-
+        val flag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            layoutFlag,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = 40
-            y = 260
-        }
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            flag, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP or Gravity.START; x = 36; y = 240 }
 
-        val density = resources.displayMetrics.density
-        val sizePx = (72 * density).toInt()
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-        }
-
+        val d = resources.displayMetrics.density
+        val sizePx = (74 * d).toInt()
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
         val frame = FrameLayout(this)
+
         val avatar = ImageView(this).apply {
-            setImageResource(R.drawable.noori_hero)
+            setImageResource(R.drawable.noori_ref)
             scaleType = ImageView.ScaleType.CENTER_CROP
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setStroke((3f * density).toInt(), Color.parseColor("#A855F7"))
-            }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setStroke((3f * d).toInt(), Color.parseColor("#A855F7")) }
             clipToOutline = true
         }
         avatarView = avatar
         frame.addView(avatar, FrameLayout.LayoutParams(sizePx, sizePx))
 
         val closeBtn = TextView(this).apply {
-            text = "✕"
-            textSize = 10f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#CC1E1038"))
-            }
+            text = "✕"; textSize = 10f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.parseColor("#CC1E1038")) }
             setOnClickListener { stopSelf() }
         }
-        val closeSize = (22 * density).toInt()
-        frame.addView(closeBtn, FrameLayout.LayoutParams(closeSize, closeSize, Gravity.TOP or Gravity.END))
-
-        val micBadge = TextView(this).apply {
-            text = "🎤"
-            textSize = 11f
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#9333EA"))
-            }
-            setOnClickListener { voiceManager?.startListening() }
-        }
-        val micSize = (24 * density).toInt()
-        frame.addView(micBadge, FrameLayout.LayoutParams(micSize, micSize, Gravity.BOTTOM or Gravity.END))
+        frame.addView(closeBtn, FrameLayout.LayoutParams((22 * d).toInt(), (22 * d).toInt(), Gravity.TOP or Gravity.END))
 
         val badge = TextView(this).apply {
-            text = "💜 Noori"
-            textSize = 10f
-            setTextColor(Color.WHITE)
-            setPadding((8 * density).toInt(), (2 * density).toInt(), (8 * density).toInt(), (2 * density).toInt())
-            background = GradientDrawable().apply {
-                cornerRadius = 12 * density
-                setColor(Color.parseColor("#CC140B29"))
-                setStroke((1 * density).toInt(), Color.parseColor("#A855F7"))
-            }
+            text = "💜 Noori"; textSize = 10f; setTextColor(Color.WHITE)
+            setPadding((8 * d).toInt(), (2 * d).toInt(), (8 * d).toInt(), (2 * d).toInt())
+            background = GradientDrawable().apply { cornerRadius = 12 * d; setColor(Color.parseColor("#CC140B29")); setStroke((1 * d).toInt(), Color.parseColor("#A855F7")) }
         }
         statusBadge = badge
+        root.addView(frame); root.addView(badge)
 
-        root.addView(frame)
-        root.addView(badge)
-
-        var initialX = 0
-        var initialY = 0
-        var touchX = 0f
-        var touchY = 0f
-        var moved = false
-
-        avatar.setOnTouchListener { _, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialX = params.x
-                    initialY = params.y
-                    touchX = event.rawX
-                    touchY = event.rawY
-                    moved = false
-                    true
-                }
+        var ix = 0; var iy = 0; var tx = 0f; var ty = 0f; var moved = false
+        avatar.setOnTouchListener { _, e ->
+            when (e.action) {
+                MotionEvent.ACTION_DOWN -> { ix = params.x; iy = params.y; tx = e.rawX; ty = e.rawY; moved = false; true }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = (event.rawX - touchX).toInt()
-                    val dy = (event.rawY - touchY).toInt()
+                    val dx = (e.rawX - tx).toInt(); val dy = (e.rawY - ty).toInt()
                     if (kotlin.math.abs(dx) > 8 || kotlin.math.abs(dy) > 8) moved = true
-                    params.x = initialX + dx
-                    params.y = initialY + dy
-                    windowManager?.updateViewLayout(root, params)
-                    true
+                    params.x = ix + dx; params.y = iy + dy; windowManager?.updateViewLayout(root, params); true
                 }
-                MotionEvent.ACTION_UP -> {
-                    if (!moved) {
-                        voiceManager?.startListening()
-                    }
-                    true
-                }
+                MotionEvent.ACTION_UP -> { if (!moved) voiceManager?.startListening(); true }
                 else -> false
             }
         }
-
         floatingView = root
         windowManager?.addView(root, params)
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        try { unregisterReceiver(unlockReceiver) } catch (_: Exception) {}
         handler.removeCallbacks(breatheRunnable)
         serviceScope.cancel()
         voiceManager?.destroy()
         floatingView?.let { windowManager?.removeView(it) }
-        floatingView = null
     }
 }
+EOF
+
+2. अब **`MemoryManager.kt`** खोलें → **✏️ Edit** → पुराना कोड Delete करके नीचे वाला कोड Paste करें और **`Commit changes`** दबाएं:
+
+```kotlin
+package com.noori.companion
+
+import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class MemoryItem(
+    val id: Long,
+    val fact: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+class MemoryManager(context: Context) {
+    private val prefs = context.getSharedPreferences("noori_memory_db", Context.MODE_PRIVATE)
+    private val key = "saved_memories_v1"
+    private val enabledKey = "memory_enabled_v1"
+
+    private val sensitiveKeywords = listOf(
+        "password", "otp", "pin", "cvv", "aadhaar", "pan card", "bank", "पासवर्ड", "ओटीपी", "पिन"
+    )
+
+    fun isMemoryEnabled(): Boolean = prefs.getBoolean(enabledKey, true)
+    fun setMemoryEnabled(enabled: Boolean) = prefs.edit().putBoolean(enabledKey, enabled).apply()
+
+    fun isSensitive(text: String): Boolean {
+        val lower = text.lowercase()
+        return sensitiveKeywords.any { lower.contains(it) }
+    }
+
+    fun getMemories(): List<MemoryItem> {
+        val raw = prefs.getString(key, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(raw)
+            List(arr.length()) { i ->
+                val obj = arr.getJSONObject(i)
+                MemoryItem(obj.getLong("id"), obj.getString("fact"), obj.optLong("createdAt", System.currentTimeMillis()))
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveAll(list: List<MemoryItem>) {
+        val arr = JSONArray()
+        list.forEach { item ->
+            arr.put(JSONObject().put("id", item.id).put("fact", item.fact).put("createdAt", item.createdAt))
+        }
+        prefs.edit().putString(key, arr.toString()).apply()
+    }
+
+    fun addMemory(fact: String, allowSensitive: Boolean = false): Boolean {
+        if (!isMemoryEnabled()) return false
+        val clean = fact.trim()
+        if (clean.isEmpty()) return false
+        if (!allowSensitive && isSensitive(clean)) return false
+        val current = getMemories().toMutableList()
+        if (current.any { it.fact.equals(clean, ignoreCase = true) }) return false
+        current.add(0, MemoryItem(System.currentTimeMillis(), clean))
+        saveAll(current)
+        return true
+    }
+
+    fun deleteMemory(id: Long) = saveAll(getMemories().filterNot { it.id == id })
+
+    fun clearAll() = saveAll(emptyList())
+}
+
