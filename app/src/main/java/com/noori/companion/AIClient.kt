@@ -33,7 +33,12 @@ sealed class AIResult {
 }
 
 object AIClient {
-    private val GEMINI_MODELS = listOf("gemini-3.7-flash", "gemini-2.5-flash", "gemini-flash-latest")
+    private val GEMINI_MODELS = listOf(
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3.7-flash",
+        "gemini-flash-latest"
+    )
     private const val OPENAI_MODEL = "gpt-4o-mini"
 
     private fun buildSystemPrompt(memories: List<MemoryItem>, mood: String): String {
@@ -104,7 +109,10 @@ Optional tags you may append at the VERY END of your reply:
             if (res is AIResult.Success) return res
             if (res is AIResult.Error) {
                 lastError = res
-                if (!res.message.contains("404")) return res
+                val msg = res.message.lowercase()
+                if (!msg.contains("404") && !msg.contains("503") && !msg.contains("timeout")) {
+                    return res
+                }
             }
         }
         return lastError ?: AIResult.Error("Gemini से जवाब नहीं मिल पाया।")
@@ -126,7 +134,7 @@ Optional tags you may append at the VERY END of your reply:
                 setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                 setRequestProperty("x-goog-api-key", apiKey)
                 connectTimeout = 15000
-                readTimeout = 25000
+                readTimeout = 45000
                 doOutput = true
             }
 
@@ -192,7 +200,7 @@ Optional tags you may append at the VERY END of your reply:
                 setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                 setRequestProperty("Authorization", "Bearer $apiKey")
                 connectTimeout = 15000
-                readTimeout = 25000
+                readTimeout = 45000
                 doOutput = true
             }
 
