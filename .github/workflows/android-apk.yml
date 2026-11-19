@@ -1,4 +1,4 @@
- name: Build Noori Debug APK
+name: Build Noori Debug APK
 
 on:
   push:
