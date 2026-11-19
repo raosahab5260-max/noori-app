@@ -8,6 +8,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import java.util.Locale
 
 class VoiceManager(
@@ -22,16 +23,16 @@ class VoiceManager(
     private var speechRecognizer: SpeechRecognizer? = null
 
     init {
-        tts = TextToSpeech(context) { status ->
+        tts = TextToSpeech(context, { status ->
             if (status == TextToSpeech.SUCCESS) {
-                val hindiLocale = Locale("hi", "IN")
-                val res = tts?.setLanguage(hindiLocale)
+                val res = tts?.setLanguage(Locale("hi", "IN"))
                 if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
                     tts?.setLanguage(Locale("en", "IN"))
                 }
-                selectFemaleVoiceIfAvailable()
-                tts?.setPitch(1.08f)
-                tts?.setSpeechRate(0.98f)
+                selectSoftFemaleVoice()
+                // सॉफ्ट, मीठी और नैचुरल आवाज़ के लिए हल्की धीमी गति और नैचुरल पिच
+                tts?.setPitch(1.04f)
+                tts?.setSpeechRate(0.92f)
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) = onSpeakingStateChanged(true)
                     override fun onDone(utteranceId: String?) = onSpeakingStateChanged(false)
@@ -40,29 +41,46 @@ class VoiceManager(
                 })
                 ttsReady = true
             }
+        }, "com.google.android.tts")
+    }
+
+    private fun selectSoftFemaleVoice() {
+        val voices = tts?.voices ?: return
+        val hindiVoices = voices.filter {
+            it.locale.language == "hi" && it.quality >= Voice.QUALITY_NORMAL
+        }
+        // सबसे पहले Google की Neural / Network Female Hindi वॉइस चुनें
+        val best = hindiVoices.firstOrNull { v ->
+            val n = v.name.lowercase()
+            (n.contains("network") || v.quality >= Voice.QUALITY_HIGH) &&
+                (n.contains("hia") || n.contains("hic") || n.contains("hie") || n.contains("female") || n.contains("-f-"))
+        } ?: hindiVoices.firstOrNull { v ->
+            val n = v.name.lowercase()
+            n.contains("hia") || n.contains("hic") || n.contains("female") || n.contains("-f-")
+        } ?: hindiVoices.maxByOrNull { it.quality }
+
+        if (best != null) {
+            tts?.voice = best
         }
     }
 
     fun updateVoiceTuning(pitch: Float, rate: Float) {
-        tts?.setPitch(pitch.coerceIn(0.7f, 1.5f))
-        tts?.setSpeechRate(rate.coerceIn(0.7f, 1.5f))
-    }
-
-    private fun selectFemaleVoiceIfAvailable() {
-        val voices = tts?.voices ?: return
-        val preferred = voices.firstOrNull { voice ->
-            val lang = voice.locale.language
-            val name = voice.name.lowercase()
-            (lang == "hi" || lang == "en") &&
-                (name.contains("female") || name.contains("-f-") || name.contains("hia") || name.contains("hif"))
-        }
-        if (preferred != null) tts?.voice = preferred
+        tts?.setPitch(pitch.coerceIn(0.8f, 1.3f))
+        tts?.setSpeechRate(rate.coerceIn(0.75f, 1.2f))
     }
 
     fun speak(text: String) {
         if (!ttsReady) return
-        val cleanText = text.replace("*", "").replace("#", "").trim()
-        tts?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, "noori_utterance_${System.currentTimeMillis()}")
+        // इमोजी और सिंबल हटाएं ताकि आवाज़ बिल्कुल साफ और नैचुरल बोले
+        val clean = text
+            .replace(Regex("[\\p{So}\\p{Cn}*#]"), " ")
+            .replace("!", ", ")
+            .replace("...", ", ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (clean.isNotEmpty()) {
+            tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "noori_${System.currentTimeMillis()}")
+        }
     }
 
     fun stopSpeaking() {
@@ -72,10 +90,9 @@ class VoiceManager(
 
     fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onSpeechError("आपके फ़ोन में Voice Recognition उपलब्ध नहीं है।")
+            onSpeechError("Voice Recognition उपलब्ध नहीं है।")
             return
         }
-
         stopSpeaking()
         speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
@@ -87,21 +104,17 @@ class VoiceManager(
                 override fun onEndOfSpeech() = onListeningStateChanged(false)
                 override fun onError(error: Int) {
                     onListeningStateChanged(false)
-                    onSpeechError("आवाज़ साफ सुनाई नहीं दी, कृपया फिर से बोलें।")
+                    onSpeechError("आवाज़ साफ नहीं आई, फिर बोलें।")
                 }
-
                 override fun onResults(results: Bundle?) {
                     onListeningStateChanged(false)
-                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val spoken = matches?.firstOrNull()?.trim()
+                    val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim()
                     if (!spoken.isNullOrEmpty()) onSpeechResult(spoken)
                 }
-
                 override fun onPartialResults(partialResults: Bundle?) {}
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
         }
-
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
