@@ -453,3 +453,74 @@ fun NooriApp(lastCrash: String? = null) {
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xFF140B29))
                 .border(1.dp, Color(0xFF4C1D95), RoundedCornerShape(24.dp))
+                .padding(6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            NavPill(Icons.Default.Mic, "Voice Talk", active = nooriState == NooriState.LISTENING) { triggerMic() }
+            NavPill(Icons.Default.Psychology, "Smart Mode", active = showSmartMode) { showSmartMode = true }
+            NavPill(Icons.Default.Star, "Noori Mood", active = showMoodAndActions) { showMoodAndActions = true }
+            NavPill(Icons.Default.Settings, "Settings", active = showSettings) { showSettings = true }
+        }
+    }
+
+    pendingAction?.let { action ->
+        ActionConfirmDialog(
+            action = action,
+            context = context,
+            onResult = { res ->
+                messages.add(ChatMessage(text = res, isUser = false, timeLabel = nowLabel()))
+                pendingAction = null
+            },
+            onDismiss = { pendingAction = null }
+        )
+    }
+
+    if (showSmartMode) {
+        SmartModeDialog(
+            provider = provider,
+            memories = memories,
+            memoryManager = memoryManager,
+            onMemoriesChanged = { memories = it },
+            onDismiss = { showSmartMode = false }
+        )
+    }
+
+    if (showMoodAndActions) {
+        MoodAndActionsDialog(
+            nooriMood = nooriMood,
+            onMoodSelect = { m ->
+                nooriMood = m
+                prefs.edit().putString("noori_mood", m).apply()
+                showMoodAndActions = false
+            },
+            onQuickAction = { act ->
+                showMoodAndActions = false
+                pendingAction = act
+            },
+            onDismiss = { showMoodAndActions = false }
+        )
+    }
+
+    if (showSettings) {
+        NooriSettingsDialog(
+            context = context,
+            prefs = prefs,
+            provider = provider,
+            geminiKey = geminiKey,
+            openAiKey = openAiKey,
+            voiceEnabled = voiceEnabled,
+            floatingEnabled = floatingEnabled,
+            voiceManager = voiceManager,
+            onProviderChange = { p -> provider = p; prefs.edit().putString("ai_provider", p.name).apply() },
+            onVoiceChange = { v -> voiceEnabled = v; prefs.edit().putBoolean("voice_enabled", v).apply() },
+            onFloatingChange = { f -> floatingEnabled = f; prefs.edit().putBoolean("floating_enabled", f).apply() },
+            onSaveKeys = { g, o ->
+                geminiKey = g
+                openAiKey = o
+                prefs.edit().putString("gemini_api_key", g).putString("openai_api_key", o).apply()
+                showSettings = false
+            },
+            onDismiss = { showSettings = false }
+        )
+    }
+}
