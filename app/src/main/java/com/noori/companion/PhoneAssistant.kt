@@ -23,11 +23,42 @@ sealed class PendingPhoneAction(val title: String, val description: String) {
 }
 
 object PhoneAssistant {
+    private val aliases = mapOf(
+        "yt" to "youtube",
+        "insta" to "instagram",
+        "wa" to "whatsapp",
+        "gpay" to "google pay",
+        "playstore" to "play store",
+        "hotstar" to "jiohotstar"
+    )
+
     fun getCurrentTimeText(): String {
         val timeFmt = SimpleDateFormat("hh:mm a", Locale("hi", "IN"))
         val dateFmt = SimpleDateFormat("EEEE, d MMMM yyyy", Locale("hi", "IN"))
         val now = Date()
         return "अभी ${timeFmt.format(now)} हो रहे हैं, और आज ${dateFmt.format(now)} है।"
+    }
+
+    // फ़ोन के किसी भी ऐप को खोलने की लोकल कमांड ("Instagram kholo", "open PhonePe", "Spotify chalao")
+    fun tryParseLocalCommand(userText: String): PendingPhoneAction? {
+        val clean = userText.trim()
+        val lower = clean.lowercase()
+
+        val triggers = listOf("kholo", "khol do", "open", "chalao", "chalu karo", "launch", "खोलो", "खोल दो", "चलाओ")
+        val hasTrigger = triggers.any { lower.contains(it) }
+        if (!hasTrigger) return null
+
+        var target = clean
+            .replace(Regex("(?i)\\b(noori|please|pls|app|ऐप|kholo|khol do|khol|open|chalao|chalu karo|launch|karo|do)\\b"), " ")
+            .replace("खोलो", " ")
+            .replace("खोल दो", " ")
+            .replace("चलाओ", " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        if (target.isEmpty()) return null
+        val mapped = aliases[target.lowercase()] ?: target
+        return PendingPhoneAction.OpenApp(mapped)
     }
 
     fun parseActionTag(tag: String): PendingPhoneAction? {
@@ -105,11 +136,17 @@ object PhoneAssistant {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
         val apps = pm.queryIntentActivities(mainIntent, 0)
+        val cleanQuery = queryName.replace(" ", "").lowercase()
+
         val match = apps.firstOrNull { info ->
             val label = info.loadLabel(pm).toString()
-            label.contains(queryName, ignoreCase = true) ||
-                info.activityInfo.packageName.contains(queryName, ignoreCase = true)
+            val cleanLabel = label.replace(" ", "").lowercase()
+            cleanLabel == cleanQuery ||
+                cleanLabel.contains(cleanQuery) ||
+                label.contains(queryName, ignoreCase = true) ||
+                info.activityInfo.packageName.contains(cleanQuery, ignoreCase = true)
         }
+
         return if (match != null) {
             val launchIntent = pm.getLaunchIntentForPackage(match.activityInfo.packageName)
             if (launchIntent != null) {
