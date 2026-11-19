@@ -33,7 +33,7 @@ sealed class AIResult {
 }
 
 object AIClient {
-    private const val GEMINI_MODEL = "gemini-2.5-flash"
+    private val GEMINI_MODELS = listOf("gemini-3.7-flash", "gemini-2.5-flash", "gemini-flash-latest")
     private const val OPENAI_MODEL = "gpt-4o-mini"
 
     private fun buildSystemPrompt(memories: List<MemoryItem>, mood: String): String {
@@ -73,7 +73,7 @@ Optional tags you may append at the VERY END of your reply:
     ): AIResult = withContext(Dispatchers.IO) {
         val sysPrompt = buildSystemPrompt(memories, mood)
         when (provider) {
-            AIProvider.GEMINI -> callGemini(geminiKey.trim(), sysPrompt, history, userMessage)
+            AIProvider.GEMINI -> callGeminiWithFallback(geminiKey.trim(), sysPrompt, history, userMessage)
             AIProvider.OPENAI -> callOpenAI(openAiKey.trim(), sysPrompt, history, userMessage)
         }
     }
@@ -88,7 +88,7 @@ Optional tags you may append at the VERY END of your reply:
         return AIResult.Success(cleanReply, extractedMem, extractedAct)
     }
 
-    private fun callGemini(
+    private fun callGeminiWithFallback(
         apiKey: String,
         sysPrompt: String,
         history: List<ChatMessage>,
@@ -97,13 +97,34 @@ Optional tags you may append at the VERY END of your reply:
         if (apiKey.isEmpty()) {
             return AIResult.Error("कृपया Settings (⚙️) में जाकर अपनी Gemini API Key डालें।")
         }
+
+        var lastError: AIResult.Error? = null
+        for (model in GEMINI_MODELS) {
+            val res = callGeminiModel(model, apiKey, sysPrompt, history, userMessage)
+            if (res is AIResult.Success) return res
+            if (res is AIResult.Error) {
+                lastError = res
+                if (!res.message.contains("404")) return res
+            }
+        }
+        return lastError ?: AIResult.Error("Gemini से जवाब नहीं मिल पाया।")
+    }
+
+    private fun callGeminiModel(
+        model: String,
+        apiKey: String,
+        sysPrompt: String,
+        history: List<ChatMessage>,
+        userMessage: String
+    ): AIResult {
         var conn: HttpURLConnection? = null
         return try {
             val endpoint =
-                "https://generativelanguage.googleapis.com/v1beta/models/$GEMINI_MODEL:generateContent?key=$apiKey"
+                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
             conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                setRequestProperty("x-goog-api-key", apiKey)
                 connectTimeout = 15000
                 readTimeout = 25000
                 doOutput = true
@@ -133,7 +154,12 @@ Optional tags you may append at the VERY END of your reply:
             val text = BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
 
             if (code !in 200..299) {
-                return AIResult.Error("Gemini Error ($code): अपनी API Key या इंटरनेट जांचें।")
+                val msg = try {
+                    JSONObject(text).optJSONObject("error")?.optString("message")
+                } catch (_: Exception) {
+                    null
+                }
+                return AIResult.Error("Gemini Error ($code): ${msg ?: "API Key या इंटरनेट जांचें।"}")
             }
 
             val raw = JSONObject(text).optJSONArray("candidates")
