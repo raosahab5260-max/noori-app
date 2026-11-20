@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -166,7 +165,7 @@ fun NooriApp() {
                     }
                 }
                 Box(modifier = Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 22.dp).width(155.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xAA170B2B)).border(1.dp, Color(0xFF7E22CE), RoundedCornerShape(14.dp)).padding(10.dp)) {
-                    Text("Main Noori hoon 🌙\nTum mujhse kuch bhi baat kar sakte ho... Main hamesha tumhare saath hoon 💜✨", color = Color(0xFFF3E8FF), fontSize = 10.sp, lineHeight = 14.sp)
+                    Text("Main Noori hoon 🌙\nTum mujhse kuch bhi baat kar sakte ho... 💜✨", color = Color(0xFFF3E8FF), fontSize = 10.sp, lineHeight = 14.sp)
                 }
             }
             Box(modifier = Modifier.align(Alignment.BottomCenter).size(56.dp).shadow(14.dp, CircleShape, ambientColor = Color(0xFFA855F7), spotColor = Color(0xFFA855F7)).clip(CircleShape).background(Brush.radialGradient(if (nooriState == NooriState.LISTENING) listOf(Color(0xFF22D3EE), Color(0xFF0891B2)) else listOf(Color(0xFFC084FC), Color(0xFF6B21A8)))).border(2.dp, Color.White.copy(alpha = 0.7f), CircleShape).clickable { triggerMic() }, contentAlignment = Alignment.Center) {
@@ -213,57 +212,17 @@ fun NooriApp() {
         }
     }
 
-    pendingAction?.let { act ->
-        AlertDialog(onDismissRequest = { pendingAction = null }, containerColor = Color(0xFF1A1033), titleContentColor = Color.White, textContentColor = Color(0xFFE9D5FF), title = { Text(act.title) }, text = { Text(act.description) }, confirmButton = { Button(onClick = { messages.add(ChatMessage(text = PhoneAssistant.executeAction(context, act), isUser = false)); pendingAction = null }) { Text("हाँ, करें") } }, dismissButton = { TextButton(onClick = { pendingAction = null }) { Text("रद्द करें") } })
-    }
-
-    if (showSmartMode) {
-        var memOn by remember { mutableStateOf(memoryManager.isMemoryEnabled()) }
-        AlertDialog(onDismissRequest = { showSmartMode = false }, containerColor = Color(0xFF1A1033), titleContentColor = Color.White, textContentColor = Color(0xFFE9D5FF), title = { Text("🧠 Smart Mode • Memory (${memories.size})") }, text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Memory On/Off", fontSize = 12.sp); Switch(checked = memOn, onCheckedChange = { memOn = it; memoryManager.setMemoryEnabled(it) }) }
-                LazyColumn(modifier = Modifier.heightIn(max = 180.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(memories, key = { it.id }) { item ->
-                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFF26174A)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(item.fact, Modifier.weight(1f), fontSize = 12.sp, color = Color.White)
-                            IconButton(onClick = { memoryManager.deleteMemory(item.id); memories = memoryManager.getMemories() }, modifier = Modifier.size(26.dp)) { Icon(Icons.Default.Delete, "Delete", tint = Color(0xFFF472B6)) }
-                        }
-                    }
-                }
-                TextButton(onClick = { memoryManager.clearAll(); memories = emptyList() }) { Text("Clear All", color = Color(0xFFF472B6)) }
-            }
-        }, confirmButton = { TextButton(onClick = { showSmartMode = false }) { Text("बंद करें") } })
-    }
-
-    if (showMood) {
-        AlertDialog(onDismissRequest = { showMood = false }, containerColor = Color(0xFF1A1033), titleContentColor = Color.White, textContentColor = Color(0xFFE9D5FF), title = { Text("⭐ Quick Phone Actions") }, text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { showMood = false; pendingAction = PendingPhoneAction.OpenApp("WhatsApp") }, modifier = Modifier.fillMaxWidth()) { Text("💬 WhatsApp खोलें") }
-                Button(onClick = { showMood = false; pendingAction = PendingPhoneAction.OpenApp("Instagram") }, modifier = Modifier.fillMaxWidth()) { Text("📸 Instagram खोलें") }
-                Button(onClick = { showMood = false; pendingAction = PendingPhoneAction.OpenApp("YouTube") }, modifier = Modifier.fillMaxWidth()) { Text("▶️ YouTube खोलें") }
-                Button(onClick = { showMood = false; pendingAction = PendingPhoneAction.SetAlarm(7, 0) }, modifier = Modifier.fillMaxWidth()) { Text("⏰ सुबह 7:00 का अलार्म") }
-            }
-        }, confirmButton = { TextButton(onClick = { showMood = false }) { Text("बंद करें") } })
-    }
-
-    if (showSettings) {
-        var draftKey by remember { mutableStateOf(apiKey) }
-        AlertDialog(onDismissRequest = { showSettings = false }, containerColor = Color(0xFF1A1033), titleContentColor = Color.White, textContentColor = Color(0xFFE9D5FF), title = { Text("⚙️ Settings (₹0 Free)") }, text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = draftKey, onValueChange = { draftKey = it }, label = { Text("Free Gemini API Key") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Voice Output", fontSize = 12.sp); Switch(checked = voiceEnabled, onCheckedChange = { voiceEnabled = it; prefs.edit().putBoolean("voice_enabled", it).apply() }) }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Unlock Greeting", fontSize = 12.sp); Switch(checked = unlockGreeting, onCheckedChange = { unlockGreeting = it; prefs.edit().putBoolean("unlock_greeting", it).apply() }) }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Home Screen Noori (Photo 2)", fontSize = 12.sp)
-                    Switch(checked = floatingEnabled, onCheckedChange = { want ->
-                        if (want && !Settings.canDrawOverlays(context)) { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))) }
-                        else {
-                            floatingEnabled = want; prefs.edit().putBoolean("floating_enabled", want).apply()
-                            val svc = Intent(context, FloatingCompanionService::class.java)
-                            if (want) { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(svc) else context.startService(svc) }
-                            else context.stopService(svc)
-                        }
-                    })
-                }
-            }
-        }, confirmButton = { Button(onClick = { apiKey = draftKey.trim(); prefs.edit().putString("gemini_api_key", apiKey).apply(); showSettings = false }) { Text("सेव करें") } }, dismissButton = { TextButton(onClick = { showSettings = false }) { Text("बंद करें") }
+    NooriDialogsHost(
+        context = context, prefs = prefs, memoryManager = memoryManager, memories = memories, onMemoriesUpdate = { memories = it },
+        pendingAction = pendingAction, onActionResult = { r -> messages.add(ChatMessage(text = r, isUser = false)); pendingAction = null }, onDismissAction = { pendingAction = null },
+        showSmartMode = showSmartMode, onDismissSmart = { showSmartMode = false },
+        showMood = showMood, onPickAction = { act -> showMood = false; pendingAction = act }, onDismissMood = { showMood = false },
+        showSettings = showSettings, apiKey = apiKey, voiceEnabled = voiceEnabled, unlockGreeting = unlockGreeting, floatingEnabled = floatingEnabled,
+        onSaveSettings = { k, v, u, f ->
+            apiKey = k; voiceEnabled = v; unlockGreeting = u; floatingEnabled = f
+            prefs.edit().putString("gemini_api_key", k).putBoolean("voice_enabled", v).putBoolean("unlock_greeting", u).putBoolean("floating_enabled", f).apply()
+            showSettings = false
+        },
+        onDismissSettings = { showSettings = false }
+    )
+}
